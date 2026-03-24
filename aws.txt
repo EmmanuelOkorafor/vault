@@ -1,0 +1,577 @@
+--- vpc-07784ef17d8e2cfc3
+
+
+
+
+# Login Docker to ECR
+aws ecr get-login-password --region us-east-1 \
+| docker login --username AWS \
+--password-stdin 672670075475.dkr.ecr.us-east-1.amazonaws.com
+
+# See all repos in ecr 
+aws ecr describe-repositories
+
+
+# List images inside a repo 
+aws ecr list-images \
+--repository-name goyerv-auth
+
+
+
+###########################################
+
+
+# List all subnets
+aws ec2 describe-subnets --query 'Subnets[*].[SubnetId,VpcId,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]' --output table
+
+------------------------------------------------------------------------------------------------
+|                                        DescribeSubnets                                       |
++---------------------------+-------------------------+-----------------+-------------+--------+
+|  subnet-081d3e8ff535e824f |  vpc-07784ef17d8e2cfc3  |  172.31.0.0/20  |  us-east-1c |  True  |
+|  subnet-0e0bf314cb699b910 |  vpc-07784ef17d8e2cfc3  |  172.31.48.0/20 |  us-east-1e |  True  |
+|  subnet-0fb8a145984009505 |  vpc-07784ef17d8e2cfc3  |  172.31.32.0/20 |  us-east-1b |  True  |
+|  subnet-01b6b8c00d393fa92 |  vpc-07784ef17d8e2cfc3  |  172.31.16.0/20 |  us-east-1a |  True  |
+|  subnet-0cadd5f46e278b703 |  vpc-07784ef17d8e2cfc3  |  172.31.96.0/20 |  us-east-1a |  False |
+|  subnet-0549119238d2f815d |  vpc-07784ef17d8e2cfc3  |  172.31.64.0/20 |  us-east-1f |  True  |
+|  subnet-04cfb5a02d58f160f |  vpc-07784ef17d8e2cfc3  |  172.31.80.0/20 |  us-east-1d |  True  |
++---------------------------+-------------------------+-----------------+-------------+--------+
+
+
+SubnetId | CIDR | AZ | Type
+subnet-081d3e8ff535e824f | 172.31.0.0/20 | us-east-1c | Private
+subnet-0e0bf314cb699b910 | 172.31.48.0/20 | us-east-1e | Private
+subnet-0fb8a145984009505 | 172.31.32.0/20 | us-east-1b | Private
+subnet-01b6b8c00d393fa92 | 172.31.16.0/20 | us-east-1a | Private
+subnet-0549119238d2f815d | 172.31.64.0/20 | us-east-1f | Private
+subnet-0cadd5f46e278b703 | 172.31.96.0/20 | us-east-1a | Private
+subnet-04cfb5a02d58f160f | 172.31.80.0/20 | us-east-1d | Private
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################################################################
+
+- Create instance
+aws rds create-db-instance \
+  --db-instance-identifier goyerv-aurora-instance-1 \
+  --db-cluster-identifier goyerv-aurora-cluster \
+  --engine aurora-mysql \
+  --db-instance-class db.t3.medium \
+  --region us-east-1
+
+-- Delete Instance 
+aws rds delete-db-instance \
+  --db-instance-identifier goyerv-aurora-instance-1 \
+  --skip-final-snapshot \
+  --delete-automated-backups \
+  --region us-east-1
+
+-- Check status 
+aws rds describe-db-instances \
+  --db-instance-identifier goyerv-aurora-instance-1 \
+  --query "DBInstances[0].DBInstanceStatus"
+
+
+-- Tunnel 
+aws ssm start-session \
+  --target i-09da802bcd99b6f8e \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["goyerv-aurora-cluster.cluster-cspgs2gw0lt6.us-east-1.rds.amazonaws.com"],"portNumber":["3306"],"localPortNumber":["3306"]}'
+
+-- Terminate Tunnel 
+Ctrl + C
+
+aws rds modify-db-cluster \
+  --db-cluster-identifier goyerv-aurora-cluster \
+  --master-user-password cXuFs{$L6.5m]{.46[Q8-$zYeEd \
+  --apply-immediately
+
+>> cXuFs{$L6.5m]{.46[Q8-$zYeEd
+[client]
+host=127.0.0.1
+port=3306
+user=goyerv_administrator
+password=cXuFs{$L6.5m]{.46[Q8-$zYeEd
+
+mysql -h 127.0.0.1 -P 3306 -u goyerv_administrator -pcXuFs{$L6.5m]{.46[Q8-$zYeEd
+
+Get Aurora Cluster Details 
+aws rds describe-db-clusters --query 'DBClusters[*].[DBClusterIdentifier,Endpoint,Engine,EngineVersion,DBSubnetGroup]' --output table
+
+[
+    [
+        "goyerv-aurora-cluster",
+        "goyerv-aurora-cluster.cluster-cspgs2gw0lt6.us-east-1.rds.amazonaws.com",
+        "aurora-mysql",
+        "8.0.mysql_aurora.3.04.2",
+        "goyerv-private-data-subnet-group"
+    ]
+]
+
+
+---------------------------------------------------------------
+|                     DescribeDBClusters                      |
++------------------------+------------------------------------+
+|  goyerv-aurora-cluster |  goyerv-private-data-subnet-group  |
++------------------------+------------------------------------+
+
+
+
+Check the subnets in the Aurora subnet group 
+aws rds describe-db-subnet-groups \
+  --db-subnet-group-name goyerv-private-data-subnet-group \
+  --query 'DBSubnetGroups[0].Subnets[*].[SubnetIdentifier,SubnetAvailabilityZone]' \
+  --output json 
+
+[
+    [
+        "subnet-01b6b8c00d393fa92",
+        {
+            "Name": "us-east-1a"
+        }
+    ],
+    [
+        "subnet-0fb8a145984009505",
+        {
+            "Name": "us-east-1b"
+        }
+    ],
+    [
+        "subnet-081d3e8ff535e824f",
+        {
+            "Name": "us-east-1c"
+        }
+    ]
+]
+
+
+
+
+
+
+
+
+
+
+
+
+
+######################################## 
+
+EC2 instances 
+
+>> i-0da6f77ebaa74529a [Scylla Node 1], [Ngnix] [subnet-04cfb5a02d58f160f], [172.31.91.191]
+                      
+                       [Seems like the master node]
+>> i-0c02bca874d1a8528 [Scylla Node 2], [Kafka, /home/ssm-user/kafka/bin] [subnet-0549119238d2f815d], [172.31.79.139]
+
+>> i-09da802bcd99b6f8e [Scylla Node 3], [MySQL Instance], [subnet-01b6b8c00d393fa92], [172.31.30.192]
+
+
+- See the subnets attached to each instance 
+aws ec2 describe-instances \
+  --instance-ids i-09da802bcd99b6f8e i-0da6f77ebaa74529a i-0c02bca874d1a8528 \
+  --query 'Reservations[*].Instances[*].[InstanceId,SubnetId,VpcId,PrivateIpAddress,State.Name,Tags]' \
+  --output json
+
+
+- Check instance status
+aws ec2 describe-instances \
+  --instance-ids i-0da6f77ebaa74529a i-0c02bca874d1a8528 i-09da802bcd99b6f8e \
+  --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' \
+  --output table
+
+- Get instance IP
+aws ec2 describe-instances \
+--instance-ids i-09da802bcd99b6f8e \
+--query "Reservations[*].Instances[*].PublicIpAddress" \
+--output text
+>>> 3.87.235.33
+
+ssh -i goyerv-aws-ec2-scylla-key.pem ec2-user@3.87.235.33
+
+scp -i goyerv-aws-ec2-scylla-key.pem goyerv-aws-ec2-scylla-key.pem ec2-user@98.81.168.37:~
+
+aws ec2 stop-instances --instance-ids i-09da802bcd99b6f8e i-0da6f77ebaa74529a i-0c02bca874d1a8528 
+
+aws ssm start-session --target i-0da6f77ebaa74529a
+
+sudo rm -rf /var/lib/scylla/data/system/*
+nodetool status
+sudo systemctl status scylla-server -
+
+cqlsh 172.31.30.192
+
+aws ssm start-session \
+  --target i-0da6f77ebaa74529a \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["9042"],"localPortNumber":["9042"]}'
+
+cqlsh 127.0.0.1 9042
+
+-- List keyspaces
+SELECT keyspace_name FROM system_schema.keyspaces;
+
+-- List tables in a keyspace
+SELECT table_name FROM system_schema.tables WHERE keyspace_name='goyerv';
+
+
+
+
+- Create New Instance
+aws ec2 run-instances \
+  --image-id ami-0254b2d5c4c472488 \
+  --instance-type t3.large \
+  --key-name goyerv-aws-ec2-scylla-key \
+  --subnet-id subnet-01b6b8c00d393fa92 \
+  --security-group-ids sg-0bb6e3e082f8b6195 \
+  --placement AvailabilityZone=us-east-1a
+>>> i-09da802bcd99b6f8e [you still need to do some volume settings while inside the instance]
+
+
+
+aws ec2 create-key-pair \
+  --key-name goyerv-aws-ec2-scylla-key \
+  --query "KeyMaterial" \
+  --output text > goyerv-aws-ec2-scylla-key.pem
+
+chmod 400 goyerv-aws-ec2-scylla-key.pem
+
+
+
+aws ec2 create-tags \
+  --resources i-09da802bcd99b6f8e \
+  --tags Key=Name,Value=ScyllaNode3
+
+
+
+
+
+
+
+
+
+
+########################################################
+VPC Endpoints 
+
+aws ec2 describe-security-groups \
+  --query 'SecurityGroups[*].[GroupId,GroupName,VpcId,Description]' \
+  --output table
+
+-------------------------------------------------------------------------------------------------------------
+|                                          DescribeSecurityGroups                                           |
++----------------------+----------------------------+------------------------+------------------------------+
+|  sg-0dac5183e2b229860|  goyerv-private-app-sg     |  vpc-07784ef17d8e2cfc3 |  Lambda, EC2                 |
+|  sg-0979ebdcb9ad8ffaa|  goyerv-bastion-sg         |  vpc-07784ef17d8e2cfc3 |  Bastion host SG             |
+|  sg-035d95ecf4f3e9f62|  default                   |  vpc-07784ef17d8e2cfc3 |  default VPC security group  |
+|  sg-0298e55e0d460049e|  goyerv-ssm-endpoints      |  vpc-07784ef17d8e2cfc3 |  Amazon Session Manager      |
+|  sg-020008fdeeace4573|  goyerv-private-data-sg    |  vpc-07784ef17d8e2cfc3 |  Aurora MySQL access, Redis  |
+|  sg-0bb6e3e082f8b6195|  goyerv-private-data-2-sg  |  vpc-07784ef17d8e2cfc3 |  Cassandra nodes SG          |
+|  sg-03e30fd57d48c6f85|  goyerv-private-data-3-sg  |  vpc-07784ef17d8e2cfc3 |  MSK SG                      |
++----------------------+----------------------------+------------------------+------------------------------+
+
+
+-- ssm 
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.ssm \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-01b6b8c00d393fa92 subnet-04cfb5a02d58f160f subnet-0549119238d2f815d subnet-081d3e8ff535e824f subnet-0e0bf314cb699b910 subnet-0fb8a145984009505 \
+  --security-group-ids sg-0298e55e0d460049e
+
+-- ssmmessages 
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.ssmmessages \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-01b6b8c00d393fa92 subnet-04cfb5a02d58f160f subnet-0549119238d2f815d subnet-081d3e8ff535e824f subnet-0e0bf314cb699b910 subnet-0fb8a145984009505 \
+  --security-group-ids sg-0298e55e0d460049e
+
+-- ec2messages 
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.ec2messages \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-01b6b8c00d393fa92 subnet-04cfb5a02d58f160f subnet-0549119238d2f815d subnet-081d3e8ff535e824f subnet-0e0bf314cb699b910 subnet-0fb8a145984009505 \
+  --security-group-ids sg-0298e55e0d460049e
+
+
+- s3 
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.s3 \
+  --vpc-endpoint-type Gateway \
+  --route-table-ids rtb-05881e987afffe86d
+
+
+
+-- Get VPCE ID for all endpoints [Remember that they change every time you create them]
+aws ec2 describe-vpc-endpoints \
+  --filters "Name=vpc-id,Values=vpc-07784ef17d8e2cfc3" \
+  --query 'VpcEndpoints[*].[VpcEndpointId,ServiceName,State]' \
+  --output table
+
+[Always check again if they've been deleted]
+aws ec2 delete-vpc-endpoints --vpc-endpoint-ids vpce-08214b3eb92e9770d vpce-0bfb9e1d911dbf426 vpce-092661d3ee151a25c
+
+
+
+aws ec2 delete-volume --volume-id vol-0911300c791917097
+
+aws ec2 create-volume --snapshot-id snap-0f5645f1f4bf0e99a --availability-zone us-east-1a --volume-type gp2
+
+
+
+
+
+###################################
+
+NAT
+
+-- Get subnet for the instance you're working on
+aws ec2 describe-instances \
+  --instance-ids i-06225793ad34cfaab \
+  --query 'Reservations[0].Instances[0].SubnetId' \
+  --output text
+
+> 1
+-- Get Private Route Tables 
+[subnet-01b6b8c00d393fa92]
+aws ec2 describe-route-tables \
+  --filters Name=association.subnet-id,Values=subnet-04cfb5a02d58f160f \
+  --query 'RouteTables[0].RouteTableId' \
+  --output text
+
+>> rtb-05881e987afffe86d
+
+> 2
+aws ec2 allocate-address --domain vpc
+
+{
+    "AllocationId": "eipalloc-0a1fbfcfe7ac9fdce",
+    "PublicIpv4Pool": "amazon",
+    "NetworkBorderGroup": "us-east-1",
+    "Domain": "vpc",
+    "PublicIp": "3.226.75.6"
+}
+
+> 3
+[subnet-0cadd5f46e278b703]
+aws ec2 create-nat-gateway --subnet-id <PUBLIC_SUBNET_ID> --allocation-id <EIP_ALLOCATION_ID>
+
+> 4
+aws ec2 describe-nat-gateways --nat-gateway-ids nat-0c52c9d73aa261b5a --query 'NatGateways[0].State' --output text
+
+> 5 [private subnet]
+aws ec2 describe-route-tables --filters Name=association.subnet-id,Values=subnet-04cfb5a02d58f160f --query 'RouteTables[0].RouteTableId' --output text
+
+> just to confirm: Destination: 0.0.0.0/0 and Target: nat-xxxxxxx
+aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=subnet-04cfb5a02d58f160f"
+
+> 6
+aws ec2 delete-route --route-table-id rtb-05881e987afffe86d --destination-cidr-block 0.0.0.0/0
+
+> 7 
+aws ec2 create-route --route-table-id rtb-05881e987afffe86d --destination-cidr-block 0.0.0.0/0 --nat-gateway-id nat-0c52c9d73aa261b5a
+
+
+-- Clean up
+> 1
+aws ec2 delete-nat-gateway --nat-gateway-id nat-0c52c9d73aa261b5a
+
+> 2
+aws ec2 disassociate-address --association-id eipalloc-05e2bad1a97290cc3
+
+> 3
+aws ec2 release-address --allocation-id eipalloc-05e2bad1a97290cc3
+
+
+
+
+
+###################################
+sudo systemctl start kafka
+sudo systemctl status kafka
+sudo systemctl daemon-reload
+
+sudo -u kafka /opt/kafka/bin/kafka-topics.sh \
+  --delete \
+  --topic goyerv.messenger.in-focus \
+  --bootstrap-server localhost:9092
+
+
+sudo -u kafka /opt/kafka/bin/kafka-topics.sh \
+  --create \
+  --topic goyerv.messenger.last-seen \
+  --bootstrap-server localhost:9092 \
+  --partitions 3 \
+  --replication-factor 1
+
+Topics 
+
+goyerv.messenger.in-focus
+goyerv.messenger.delete-message
+goyerv.messenger.phonecall-handshakes 
+goyerv.messenger.is-delivered 
+goyerv.messenger.is-read 
+goyerv.messenger.is-recording-audio
+goyerv.messenger.is-sent 
+goyerv.messenger.is-typing 
+goyerv.messenger.conversation-messages
+goyerv.messenger.last-seen
+
+
+goyerv.posts.delete-post 
+goyerv.messenger.follow 
+goyerv.requests.release-fund 
+goyerv.users.send-review 
+goyerv.posts.send-post 
+goyerv.wallet.transfer 
+
+sudo -u kafka /opt/kafka/bin/kafka-topics.sh \
+  --create \
+  --topic goyerv.requests.terminate-request \
+  --bootstrap-server localhost:9092 \
+  --partitions 3 \
+  --replication-factor 1
+
+
+goyerv.requests.account-state
+goyerv.requests.counter-request 
+goyerv.posts.delete-post 
+goyerv.requests.send-request 
+goyerv.requests.request-action 
+goyerv.requests.terminate-request
+
+
+
+
+
+
+
+
++-----------------------+
+| Tables_in_goyerv      |
++-----------------------+
+| accountRemovalPolls   |
+| analytics             |
+| bank                  |
+| bankDetails           |
+| blocked               |
+| callHistory           |
+| cardDetails           |
+| chatReports           |
+| comments              |
+| communityReports      |
+| conversationMedia     |
+| conversations         |
+| convert               |
+| counters              |
+| discussions           |
+| emailSupport          |
+| engagements           |
+| feedback              |
+| filters               |
+| hashTags              |
+| homepage              |
+| identityVerification  |
+| locations             |
+| locks                 |
+| loginHistory          |
+| messages              |
+| messenger             |
+| missedCalls           |
+| notifications         |
+| pending               |
+| postReports           |
+| posts                 |
+| replies               |
+| requests              |
+| resignation           |
+| responseReports       |
+| reviews               |
+| runs                  |
+| scheduledPosts        |
+| scheduledPostsStorage |
+| settings              |
+| support               |
+| transactionHistory    |
+| userReports           |
+| userVerificationPolls |
+| usernames             |
+| users                 |
+| verifyIdentity        |
+| wallet                |
++-----------------------+
+== 48
+
+
+
+ table_name
+-----------------------
+    accountremovalpolls
+              analytics
+           bankdetails
+               blocked
+           callhistory
+           carddetails
+           chatreports
+              comments
+      communityreports
+     conversationmedia
+         conversations
+               convert
+              counters
+          emailsupport
+           engagements
+              feedback
+               filters
+              hashtags
+              homepage
+  identityverification
+             locations
+                 locks
+          loginhistory
+              messages
+           missedcalls
+         notifications
+               pending
+           postreports
+    recent_discussions
+               replies
+              requests
+           resignation
+       responsereports
+               reviews
+        scheduledposts
+ scheduledpostsstorage
+              settings
+               support
+    transactionhistory
+             usernames
+           userreports
+                 users
+ userverificationpolls
+        verifyidentity
+                wallet
+
+(45 rows)
+
+
+I have not yet created the messenger table in messenger/send_message
+posts/get_posts
+requests/send_request runs table was not created cause of the frozen error
+did not create bank table in get available balance
