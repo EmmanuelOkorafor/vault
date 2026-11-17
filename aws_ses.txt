@@ -1,0 +1,225 @@
+########################################################
+AWS SES NOTES  (region us-east-1, domain goyerv.com)
+########################################################
+
+Problem we solved:
+  aws ses send-email --from noreply@goyerv.com failed with
+  "MessageRejected: Email address is not verified"
+  Cause: the domain identity goyerv.com existed but its DKIM check was FAILED,
+  so SES treated the whole domain (and noreply@goyerv.com) as unverified.
+
+Facts about this setup:
+  - Domain DNS is at Cloudflare (name servers alexis / elma .ns.cloudflare.com),
+    even though the domain is registered at Dynadot.
+  - DKIM CNAME records must be added in CLOUDFLARE, not in Dynadot's DNS panel.
+  - SES production access and identities are PER REGION.
+  - Lambda: goyerv-sign_up-send_auth, role goyerv-lambda-execution-role
+  - Mailer script: signup/ms_signup_send_auth/aws_mailer.sh  (args: <email> <otp>)
+
+
+########################################################
+1. Check the account: sandbox or production?
+########################################################
+
+-- ProductionAccess true = sandbox is OFF (can send to any recipient)
+-- false = sandbox ON (only verified recipients, 200 emails/day)
+aws sesv2 get-account --region us-east-1 \
+  --query '{ProductionAccess:ProductionAccessEnabled,SendingEnabled:SendingEnabled,Max24h:SendQuota.Max24HourSend,PerSecond:SendQuota.MaxSendRate}'
+
+>> ProductionAccess: true, SendingEnabled: true, Max24h: 50000, PerSecond: 14
+
+
+########################################################
+2. Check which sender identities exist
+########################################################
+
+-- Lists verified domains and email addresses and whether sending is enabled
+aws sesv2 list-email-identities --region us-east-1 \
+  --query 'EmailIdentities[].[IdentityName,IdentityType,SendingEnabled]' --output table
+
+-- Detailed status of one identity (Verified false + Dkim FAILED = the problem)
+aws sesv2 get-email-identity --email-identity goyerv.com --region us-east-1 \
+  --query '{Verified:VerifiedForSendingStatus,Dkim:DkimAttributes.Status}'
+
+-- Same, but show the DKIM tokens, signing origin and status
+aws sesv2 get-email-identity --email-identity goyerv.com --region us-east-1 \
+  --query 'DkimAttributes.{Status:Status,Origin:SigningAttributesOrigin,Tokens:Tokens}'
+
+-- Only the three DKIM tokens (used to build the DNS records)
+aws sesv2 get-email-identity --email-identity goyerv.com --region us-east-1 \
+  --query 'DkimAttributes.Tokens' --output text
+
+NOTE: The tokens are the same every time for this account + domain + region.
+      Deleting and recreating the identity gives the SAME tokens, so the
+      DNS records do not need to change.
+
+
+########################################################
+3. Test sending from the CLI
+########################################################
+
+-- Sends a real test email using YOUR credentials (not the Lambda role).
+-- No angle brackets around the recipient address.
+-- Success returns a MessageId. Error "Email address is not verified" = the sender
+-- identity or region is wrong.
+aws ses send-email --region us-east-1 \
+  --from "Goyerv <noreply@goyerv.com>" --destination "ToAddresses=you@example.com" \
+  --message "Subject={Data=test},Body={Text={Data=hello}}"
+
+
+########################################################
+4. DKIM DNS records (in Cloudflare)
+########################################################
+
+Add 3 records, one per token (from step 2):
+
+  Type          : CNAME
+  Name          : <token>._domainkey      (Cloudflare adds .goyerv.com itself)
+  Target        : <token>.dkim.amazonses.com
+  Proxy status  : DNS only (grey cloud)   <-- proxied (orange) breaks DKIM
+
+If DNS were still at Dynadot instead: use "Subdomain Records" (not "Domain Records"),
+subdomain = <token>._domainkey, type CNAME, destination = <token>.dkim.amazonses.com
+
+
+########################################################
+5. Check DNS from the terminal
+########################################################
+
+-- Which name servers does the .com registry say are authoritative?
+-- (this is the source of truth; local dig may show old cached servers)
+dig NS goyerv.com @a.gtld-servers.net +norecurse
+dig +short NS goyerv.com
+
+-- Is one DKIM record visible? Ask Cloudflare directly (no cache) and public resolvers
+dig +short CNAME <token>._domainkey.goyerv.com @alexis.ns.cloudflare.com
+dig +short CNAME <token>._domainkey.goyerv.com @8.8.8.8
+dig +short CNAME <token>._domainkey.goyerv.com @1.1.1.1
+
+-- Check all three tokens in one go (each line must end in .dkim.amazonses.com.)
+for t in $(aws sesv2 get-email-identity --email-identity goyerv.com --region us-east-1 \
+    --query 'DkimAttributes.Tokens' --output text); do
+  echo "$t -> $(dig +short CNAME @8.8.8.8 ${t}._domainkey.goyerv.com)"
+done
+
+Empty result = record missing or DNS not propagated yet.
+One missing record out of three keeps DKIM at FAILED.
+
+
+########################################################
+6. Make SES re-check DKIM
+########################################################
+
+-- Turn DKIM signing off and on to trigger a new check.
+-- (while off, mail sent from this domain through SES is not DKIM-signed)
+aws sesv2 put-email-identity-dkim-attributes --email-identity goyerv.com \
+  --no-signing-enabled --region us-east-1
+aws sesv2 put-email-identity-dkim-attributes --email-identity goyerv.com \
+  --signing-enabled --region us-east-1
+
+-- Last resort: delete and recreate the domain identity. It gives a fresh check
+-- but the SAME tokens. Does not affect other email identities.
+aws sesv2 delete-email-identity --email-identity goyerv.com --region us-east-1
+aws sesv2 create-email-identity --email-identity goyerv.com --region us-east-1 \
+  --query 'DkimAttributes.Tokens' --output text
+
+-- Poll until it shows Verified true / Dkim SUCCESS (PENDING = still checking)
+aws sesv2 get-email-identity --email-identity goyerv.com --region us-east-1 \
+  --query '{Verified:VerifiedForSendingStatus,Dkim:DkimAttributes.Status}'
+
+>> Final state: Verified true, Dkim SUCCESS. Test send in step 3 returned a MessageId.
+
+
+########################################################
+7. Check the Lambda's permissions
+########################################################
+
+-- Which IAM role does the function run as?
+aws lambda get-function-configuration --function-name goyerv-sign_up-send_auth \
+  --region us-east-1 --query Role --output text
+
+-- Managed policies attached to that role
+aws iam list-attached-role-policies --role-name goyerv-lambda-execution-role
+
+-- Inline policies on that role (we have: AllowS3AndSES, AllowSNSSend)
+aws iam list-role-policies --role-name goyerv-lambda-execution-role
+
+-- Read an inline policy to confirm it allows ses:SendEmail and s3:PutObject
+aws iam get-role-policy --role-name goyerv-lambda-execution-role \
+  --policy-name AllowS3AndSES
+
+The CLI test in step 3 uses your own credentials, so it does NOT prove the
+Lambda role is allowed to send. Check this policy separately.
+
+
+########################################################
+8. Lambda network: SES VPC endpoint (instead of a NAT gateway)
+########################################################
+
+The Lambda runs in private subnets with no internet. Your terminal works because
+it has internet; the Lambda does not. Symptom of a missing path to SES:
+"Task timed out after 30.00 seconds" and the log shows only the START line.
+
+SES has an Interface VPC endpoint for its API: com.amazonaws.us-east-1.email
+(email-smtp is a separate endpoint for SMTP only). Use it instead of a NAT gateway.
+
+-- Check the endpoint exists in the region and which AZs it supports
+aws ec2 describe-vpc-endpoint-services --region us-east-1 \
+  --service-names com.amazonaws.us-east-1.email \
+  --query 'ServiceDetails[0].AvailabilityZones'
+
+-- Which subnets and security group does the Lambda use?
+aws lambda get-function-configuration --function-name goyerv-sign_up-send_auth \
+  --region us-east-1 --query 'VpcConfig.{Subnets:SubnetIds,SG:SecurityGroupIds}'
+
+-- Does the Lambda's security group allow outbound traffic? (needs all or TCP 443)
+aws ec2 describe-security-groups --region us-east-1 --group-ids <lambda-sg> \
+  --query 'SecurityGroups[0].IpPermissionsEgress' --no-cli-pager
+
+-- Create the endpoint in ONLY the Lambda's subnets, with its own security group
+-- that allows 443 from the Lambda's security group. Private DNS must be on.
+(see the SES section in aws.txt for the exact commands we ran;
+ endpoint SG = goyerv-ses-endpoint-sg)
+
+-- Check it: State must be available and PrivateDnsEnabled true
+aws ec2 describe-vpc-endpoints --region us-east-1 \
+  --filters Name=service-name,Values=com.amazonaws.us-east-1.email \
+  --query 'VpcEndpoints[].[VpcEndpointId,State,PrivateDnsEnabled]' --output table
+
+If it hangs again, check: private DNS off, or the endpoint SG missing 443 from the
+Lambda SG. A NAT gateway would also work but costs more per month.
+S3 works from the Lambda through the S3 gateway endpoint (no NAT needed).
+
+
+########################################################
+9. Invoke and read results
+########################################################
+
+-- Calls the function with the test event (use an address you control; it sends
+-- a real email and writes a row to verifyIdentity)
+aws lambda invoke --function-name goyerv-sign_up-send_auth --region us-east-1 \
+  --cli-binary-format raw-in-base64-out --payload file:///tmp/event.json /tmp/out.json && cat /tmp/out.json; echo
+
+-- Decode the protobuf body of a success response
+jq -r .body /tmp/out.json | base64 -d | xxd
+
+-- Logs of the last 5 minutes
+aws logs tail /aws/lambda/goyerv-sign_up-send_auth --region us-east-1 --since 5m
+
+
+########################################################
+Quick troubleshooting guide
+########################################################
+
+"Email address is not verified"          -> identity/region wrong or DKIM FAILED (steps 2, 4, 5, 6)
+Sandbox / "not verified" for recipient   -> ProductionAccess false (step 1)
+Dkim stays FAILED                        -> a record missing or proxied in Cloudflare (steps 4, 5)
+dig shows old name servers               -> cache; use @a.gtld-servers.net (step 5)
+Lambda hangs until timeout               -> no NAT gateway (step 8)
+Lambda gets AccessDenied from SES        -> role policy missing ses:SendEmail (step 7)
+aws_mailer.sh prints "Usage: ..."        -> wrong number of arguments (expects <email> <otp>)
+aws ses send-email ParamValidation        -> shorthand --message breaks on commas; use a JSON file
+                                             (aws_mailer.sh now uses sesv2 send-email --content file://)
+S3 bucket stays empty after a run        -> no log files were created (only written on errors),
+                                             and the Lambda role needs s3:PutObject on the bucket
+Lambda times out calling SES             -> no VPC endpoint / NAT for SES (step 8)

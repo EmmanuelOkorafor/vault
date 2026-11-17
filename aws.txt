@@ -38,7 +38,7 @@ aws ec2 describe-subnets --query 'Subnets[*].[SubnetId,VpcId,CidrBlock,Availabil
 
 
 SubnetId | CIDR | AZ | Type
-subnet-081d3e8ff535e824f | 172.31.0.0/20 | us-east-1c | Private
+subnet-081d3e8ff535e824f | 172.31.0.0/20  | us-east-1c | Private
 subnet-0e0bf314cb699b910 | 172.31.48.0/20 | us-east-1e | Private
 subnet-0fb8a145984009505 | 172.31.32.0/20 | us-east-1b | Private
 subnet-01b6b8c00d393fa92 | 172.31.16.0/20 | us-east-1a | Private
@@ -78,6 +78,7 @@ aws rds delete-db-instance \
   --delete-automated-backups \
   --region us-east-1
 
+
 -- Check status 
 aws rds describe-db-instances \
   --db-instance-identifier goyerv-aurora-instance-1 \
@@ -103,9 +104,9 @@ aws rds modify-db-cluster \
 host=127.0.0.1
 port=3306
 user=goyerv_administrator
-password=cXuFs{$L6.5m]{.46[Q8-$zYeEd
+password=RzSGMwVUHjorNRrDjFyMfKW2aAXp4JxM
 
-mysql -h 127.0.0.1 -P 3306 -u goyerv_administrator -pcXuFs{$L6.5m]{.46[Q8-$zYeEd
+mysql -h 127.0.0.1 -P 3306 -u goyerv_administrator -pRzSGMwVUHjorNRrDjFyMfKW2aAXp4JxM
 
 Get Aurora Cluster Details 
 aws rds describe-db-clusters --query 'DBClusters[*].[DBClusterIdentifier,Endpoint,Engine,EngineVersion,DBSubnetGroup]' --output table
@@ -160,26 +161,37 @@ aws rds describe-db-subnet-groups \
 
 
 
+aws ec2 describe-instances --instance-ids i-0da6f77ebaa74529a \
+  --query "Reservations[0].Instances[0].SecurityGroups"
 
+aws ec2 describe-instances \
+  --query "Reservations[].Instances[].[InstanceId, Tags[?Key=='Name'].Value|[0], PrivateIpAddress, State.Name]" \
+  --output table
+------------------------------------------------------------------------
+|                           DescribeInstances                          |
++---------------------+------------------+------------------+----------+
+|  i-0da6f77ebaa74529a|  ScyllaNode1     |  172.31.91.191   |  stopped |
+|  i-09da802bcd99b6f8e|  ScyllaNode3     |  172.31.30.192   |  stopped |
+|  i-0d83568faac92071a|  Bastion         |  172.31.111.104  |  stopped |
+|  i-0c02bca874d1a8528|  ScyllaNode2     |  172.31.79.139   |  stopped |
+|  i-0a6d078684451f788|  coturn-bastion  |  172.31.101.25   |  stopped |
++---------------------+------------------+------------------+----------+
 
-
-
-
-
-
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin 672670075475.dkr.ecr.us-east-1.amazonaws.com
 
 ######################################## 
 
 EC2 instances 
 
->> i-0da6f77ebaa74529a [Scylla Node 1], [Ngnix] [subnet-04cfb5a02d58f160f], [172.31.91.191]
+>> i-0da6f77ebaa74529a [Scylla Node 1], [Ngnix, docker] [subnet-04cfb5a02d58f160f], [172.31.91.191]
                       
                        [Seems like the master node]
 >> i-0c02bca874d1a8528 [Scylla Node 2], [Kafka, /home/ssm-user/kafka/bin] [subnet-0549119238d2f815d], [172.31.79.139]
 
 >> i-09da802bcd99b6f8e [Scylla Node 3], [MySQL Instance], [subnet-01b6b8c00d393fa92], [172.31.30.192]
 
->> i-0a6d078684451f788 [TURN SERVER],[Ngnix, Supervisor] [subnet-0cadd5f46e278b703] [172.31.101.25 - PrivateIpAddress]
+>> i-0a6d078684451f788 [TURN SERVER],[Ngnix, Supervisor, relay.c] [subnet-0cadd5f46e278b703] [172.31.101.25 - PrivateIpAddress]
 
 - See the subnets attached to each instance 
 aws ec2 describe-instances \
@@ -194,7 +206,7 @@ aws ec2 describe-instances \
 
 - Check instance status
 aws ec2 describe-instances \
-  --instance-ids i-090278f1659382b7b \
+  --instance-ids i-09da802bcd99b6f8e i-0da6f77ebaa74529a i-0c02bca874d1a8528 \
   --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' \
   --output table
 
@@ -209,9 +221,9 @@ ssh -i goyerv-aws-ec2-scylla-key.pem ec2-user@3.87.235.33
 
 scp -i goyerv-aws-ec2-scylla-key.pem goyerv-aws-ec2-scylla-key.pem ec2-user@98.81.168.37:~
 
-aws ec2 stop-instances --instance-ids i-09da802bcd99b6f8e i-0da6f77ebaa74529a i-0c02bca874d1a8528 
+aws ec2 stop-instances --instance-ids i-0da6f77ebaa74529a i-0c02bca874d1a8528 i-09da802bcd99b6f8e
 
-aws ssm start-session --target i-0da6f77ebaa74529a
+aws ssm start-session --target i-0c02bca874d1a8528
 
 sudo rm -rf /var/lib/scylla/data/system/*
 nodetool status
@@ -263,6 +275,13 @@ aws ec2 create-tags \
 
 
 
+
+
+
+
+
+
+
 ###############
 TURN SERVER 
 
@@ -277,6 +296,7 @@ aws ec2 run-instances \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=coturn-bastion}]'
 >>>> i-0a6d078684451f788
 
+
 # Allocate 
 aws ec2 allocate-address --domain vpc
 
@@ -289,19 +309,22 @@ aws ec2 allocate-address --domain vpc
 
 aws ec2 associate-address \
   --instance-id i-0a6d078684451f788 \
-  --allocation-id eipalloc-09ad8be7f027aec1f
+  --allocation-id eipalloc-03fc056f39e8bc801
+
 
 {
-    "AssociationId": "eipassoc-05eefde14df379fea"
+    "AssociationId": "eipassoc-0f25d4d8d698e3ab3"
 }
 
+
 {
-    "AllocationId": "eipalloc-09ad8be7f027aec1f",
+    "AllocationId": "eipalloc-03fc056f39e8bc801",
     "PublicIpv4Pool": "amazon",
     "NetworkBorderGroup": "us-east-1",
     "Domain": "vpc",
-    "PublicIp": "44.222.4.146"
+    "PublicIp": "44.214.190.235"
 }
+
 
 aws ec2 create-security-group \
   --group-name coturn-sg \
@@ -312,7 +335,7 @@ aws ec2 create-security-group \
 
 # SSH — restrict to your IP only, not 0.0.0.0/0
 aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
-  --protocol tcp --port 22 --cidr 102.88.114.217/32
+  --protocol tcp --port 22 --cidr 102.88.112.132/32
 
 # STUN/TURN over UDP (primary)
 aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
@@ -330,16 +353,34 @@ aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
 aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
   --protocol udp --port 49152-65535 --cidr 0.0.0.0/0
 
+----- [Since coturn and relay share instances, also run these in prod]
+# Allow ALB to reach Nginx on port 80
+aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
+  --protocol tcp --port 80 --cidr 0.0.0.0/0
+
+# Allow relay ports (Nginx forwards to these internally, so source is localhost — no inbound rule needed)
+# But open 4001-4005 if you ever want to test them directly
+aws ec2 authorize-security-group-ingress --group-id sg-0d1f14e4ed588a4b8 \
+  --protocol tcp --port 4001-4005 --cidr 0.0.0.0/0
+
+
+------- Private EC2
+aws ec2 authorize-security-group-ingress --group-id sg-0bb6e3e082f8b6195 \
+  --protocol tcp --port 5001-5005 \
+  --source-group sg-0d1f14e4ed588a4b8
+
+
+
 
 curl checkip.amazonaws.com
 
 aws ec2 stop-instances --instance-ids i-0a6d078684451f788
 
 [ec2-user because we the instance is running amazon linux 2 and not ubuntu]
-ssh -i coturn-key.pem ec2-user@44.222.4.146
+ssh -i coturn-key.pem ec2-user@44.214.190.235
 
-scp -i coturn-key.pem /home/goyerv/goyerv/backend/relay/main.c ec2-user@44.222.4.146:/opt/goyerv/relay/
-scp -i coturn-key.pem /home/goyerv/goyerv/backend/relay/Makefile ec2-user@44.222.4.146:/opt/goyerv/relay/
+scp -i coturn-key.pem /home/goyerv/goyerv/backend/relay/main.c ec2-user@44.214.190.235:/opt/goyerv/relay/
+scp -i coturn-key.pem /home/goyerv/goyerv/backend/relay/Makefile ec2-user@44.214.190.235:/opt/goyerv/relay/
 
 
 
@@ -369,6 +410,46 @@ denied-peer-ip=192.168.0.0-192.168.255.255
 log-file=/var/log/turnserver.log
 simple-log
 
+# Create the IAMRole
+aws iam create-role \
+  --role-name goyerv-coturn-ec2-role \
+  --assume-role-policy-document file:///home/goyerv/goyerv/backend/aws/iam_role.json
+
+# Attach the permission policy
+aws iam put-role-policy \
+  --role-name goyerv-coturn-ec2-role \
+  --policy-name goyerv-coturn-ec2-policy \
+  --policy-document file:///home/goyerv/goyerv/backend/aws/permission_policy.json
+
+# Create the instance profile
+aws iam create-instance-profile \
+  --instance-profile-name goyerv-coturn-ec2-profile
+
+# Add it to the role
+aws iam add-role-to-instance-profile \
+  --instance-profile-name goyerv-coturn-ec2-profile \
+  --role-name goyerv-coturn-ec2-role
+
+# Attach profile to instance
+aws ec2 associate-iam-instance-profile \
+  --instance-id i-0a6d078684451f788 \
+  --iam-instance-profile Name=goyerv-coturn-ec2-profile
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -388,18 +469,19 @@ aws ec2 describe-security-groups \
   --query 'SecurityGroups[*].[GroupId,GroupName,VpcId,Description]' \
   --output table
 
--------------------------------------------------------------------------------------------------------------
-|                                          DescribeSecurityGroups                                           |
-+----------------------+----------------------------+------------------------+------------------------------+
-|  sg-0dac5183e2b229860|  goyerv-private-app-sg     |  vpc-07784ef17d8e2cfc3 |  Lambda, EC2                 |
-|  sg-0979ebdcb9ad8ffaa|  goyerv-bastion-sg         |  vpc-07784ef17d8e2cfc3 |  Bastion host SG             |
-|  sg-035d95ecf4f3e9f62|  default                   |  vpc-07784ef17d8e2cfc3 |  default VPC security group  |
-|  sg-0298e55e0d460049e|  goyerv-ssm-endpoints      |  vpc-07784ef17d8e2cfc3 |  Amazon Session Manager      |
-|  sg-020008fdeeace4573|  goyerv-private-data-sg    |  vpc-07784ef17d8e2cfc3 |  Aurora MySQL access, Redis  |
-|  sg-0bb6e3e082f8b6195|  goyerv-private-data-2-sg  |  vpc-07784ef17d8e2cfc3 |  Cassandra nodes SG          |
-|  sg-03e30fd57d48c6f85|  goyerv-private-data-3-sg  |  vpc-07784ef17d8e2cfc3 |  MSK SG                      |
-+----------------------+----------------------------+------------------------+------------------------------+
-
+---------------------------------------------------------------------------------------------------------------------------
+|                                                 DescribeSecurityGroups                                                  |
++----------------------+---------------------------+------------------------+---------------------------------------------+
+|  sg-07a1f82acb0fd0f1b|  bastion                  |  vpc-07784ef17d8e2cfc3 |  bastion created 2026-01-27T09:54:53.792Z   |
+|  sg-0dac5183e2b229860|  goyerv-private-app-sg    |  vpc-07784ef17d8e2cfc3 |  Lambda, EC2                                |
+|  sg-0979ebdcb9ad8ffaa|  goyerv-bastion-sg        |  vpc-07784ef17d8e2cfc3 |  Bastion host SG                            |
+|  sg-035d95ecf4f3e9f62|  default                  |  vpc-07784ef17d8e2cfc3 |  default VPC security group                 |
+|  sg-0298e55e0d460049e|  goyerv-ssm-endpoints     |  vpc-07784ef17d8e2cfc3 |  Amazon Session Manager                     |
+|  sg-020008fdeeace4573|  goyerv-private-data-sg   |  vpc-07784ef17d8e2cfc3 |  Aurora MySQL access, Redis                 |
+|  sg-03e30fd57d48c6f85|  goyerv-private-data-3-sg |  vpc-07784ef17d8e2cfc3 |  MSK SG                                     |
+|  sg-0bb6e3e082f8b6195|  goyerv-private-data-2-sg |  vpc-07784ef17d8e2cfc3 |  Cassandra nodes SG                         |
+|  sg-0d1f14e4ed588a4b8|  coturn-sg/relay          |  vpc-07784ef17d8e2cfc3 |  TURN server                                |
++----------------------+---------------------------+------------------------+---------------------------------------------+
 
 -- ssm 
 aws ec2 create-vpc-endpoint \
@@ -434,6 +516,45 @@ aws ec2 create-vpc-endpoint \
   --route-table-ids rtb-05881e987afffe86d
 
 
+[ Both below are for pulling docker images from ECR over AWS's private network.]
+[ You don't need them in prod.]
+# ECR API
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.ecr.api \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-01b6b8c00d393fa92 subnet-04cfb5a02d58f160f subnet-0549119238d2f815d subnet-081d3e8ff535e824f subnet-0e0bf314cb699b910 subnet-0fb8a145984009505 \
+  --security-group-ids sg-0298e55e0d460049e
+
+
+# ECR Docker
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.ecr.dkr \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-01b6b8c00d393fa92 subnet-04cfb5a02d58f160f subnet-0549119238d2f815d subnet-081d3e8ff535e824f subnet-0e0bf314cb699b910 subnet-0fb8a145984009505 \
+  --security-group-ids sg-0298e55e0d460049e
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 -- Get VPCE ID for all endpoints [Remember that they change every time you create them]
 aws ec2 describe-vpc-endpoints \
@@ -442,7 +563,7 @@ aws ec2 describe-vpc-endpoints \
   --output table
 
 [Always check again if they've been deleted]
-aws ec2 delete-vpc-endpoints --vpc-endpoint-ids vpce-08214b3eb92e9770d vpce-0bfb9e1d911dbf426 vpce-092661d3ee151a25c
+aws ec2 delete-vpc-endpoints --vpc-endpoint-ids vpce-09356a0842dbe2b41
 
 
 
@@ -454,8 +575,78 @@ aws ec2 create-volume --snapshot-id snap-0f5645f1f4bf0e99a --availability-zone u
 
 
 
-###################################
 
+
+#######################################3
+SES 
+# 1. Security group for the SES endpoint
+SES_SG=$(aws ec2 create-security-group --region us-east-1 \
+  --group-name goyerv-ses-endpoint-sg --description "SES VPC endpoint" \
+  --vpc-id vpc-07784ef17d8e2cfc3 --query GroupId --output text)
+echo $SES_SG
+>>> sg-084361e4b2fc81900
+
+# 2. Allow HTTPS only from the Lambda's security group
+aws ec2 authorize-security-group-ingress --region us-east-1 \
+  --group-id sg-084361e4b2fc81900 --protocol tcp --port 443 \
+  --source-group sg-0dac5183e2b229860
+
+# 3. Create the endpoint in the Lambda's two subnets
+aws ec2 create-vpc-endpoint --region us-east-1 \
+  --vpc-id vpc-07784ef17d8e2cfc3 \
+  --service-name com.amazonaws.us-east-1.email \
+  --vpc-endpoint-type Interface \
+  --subnet-ids subnet-0fb8a145984009505 subnet-01b6b8c00d393fa92 \
+  --security-group-ids sg-084361e4b2fc81900 \
+  --private-dns-enabled
+
+# 4. Wait until the State is "available"
+aws ec2 describe-vpc-endpoints --region us-east-1 \
+  --filters Name=service-name,Values=com.amazonaws.us-east-1.email \
+  --query 'VpcEndpoints[].[VpcEndpointId,State,PrivateDnsEnabled]' --output table
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################################
 NAT
 
 -- Get subnet for the instance you're working on
@@ -504,16 +695,28 @@ aws ec2 delete-route --route-table-id rtb-05881e987afffe86d --destination-cidr-b
 > 7 
 aws ec2 create-route --route-table-id rtb-05881e987afffe86d --destination-cidr-block 0.0.0.0/0 --nat-gateway-id nat-0c52c9d73aa261b5a
 
+{
+    "AssociationId": "eipassoc-0f25d4d8d698e3ab3"
+}
+
+
+{
+    "AllocationId": "eipalloc-03fc056f39e8bc801",
+    "PublicIpv4Pool": "amazon",
+    "NetworkBorderGroup": "us-east-1",
+    "Domain": "vpc",
+    "PublicIp": "44.214.190.235"
+}
 
 -- Clean up
 > 1
 aws ec2 delete-nat-gateway --nat-gateway-id nat-0c52c9d73aa261b5a
 
 > 2
-aws ec2 disassociate-address --association-id eipassoc-05eefde14df379fea
+aws ec2 disassociate-address --association-id eipassoc-0f25d4d8d698e3ab3
 
 > 3
-aws ec2 release-address --allocation-id eipalloc-09ad8be7f027aec1f
+aws ec2 release-address --allocation-id eipalloc-03fc056f39e8bc801
 
 
 
@@ -641,7 +844,8 @@ aws apigatewayv2 get-apis \
 |  goyerv-forgot-password-api       |  x3x7q3yidb |  HTTP  |
 +-----------------------------------+-------------+--------+
 
-
+aws apigatewayv2 update-authorizer --api-id 0xy0xacmm7 --authorizer-id eyl7wq \
+  --identity-source '$request.header.userID' '$request.header.accessToken' '$request.header.refreshToken'
 
 
 
@@ -767,3 +971,25 @@ I have not yet created the messenger table in messenger/send_message
 posts/get_posts
 requests/send_request runs table was not created cause of the frozen error
 did not create bank table in get available balance
+
+
+
+aws apigatewayv2 get-authorizer \
+  --api-id kgqzktkc1c \
+  --authorizer-id k0k4fi
+
+aws apigatewayv2 update-authorizer \
+  --api-id kgqzktkc1c \
+  --authorizer-id k0k4fi \
+  --authorizer-result-ttl-in-seconds 3600
+
+
+
+aws apigatewayv2 update-route \
+  --api-id djqgehqgb7 \
+  --route-id s6v9ugo \
+  --authorization-type NONE
+
+
+
+
